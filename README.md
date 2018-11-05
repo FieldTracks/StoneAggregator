@@ -1,5 +1,5 @@
 # StoneAggregator
-This is a simple script that aggregates sensor data from stones for use by the frontend (fieldmon). Also handles descriptions for stones (i.e. assigned names and colors from the frontend).
+This is a script that aggregates sensor data from stones for use by the frontend (fieldmon). It further provides functionality for logging sensor data to a mariadb database and also handles descriptions for stones (i.e. assigned names and colors from the frontend).
 
 This repository is part of the [Fieldtracks](https://fieldtracks.org/) project, which aims at creating a tracking system to be used in field exercises by relief organizations.
 
