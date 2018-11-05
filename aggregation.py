@@ -7,9 +7,11 @@ import json
 import signal
 import zlib
 import ssl
-from datetime import datetime
-from dateutil import tz
+from datetime import datetime, timezone
 import paho.mqtt.client as mqtt
+from sqlalchemy import create_engine, ForeignKey, Column, Integer, String, DateTime
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, relationship
 
 
 class BeaconId:
@@ -127,8 +129,9 @@ class Aggregator:
 
 
 class MqttService:
-    def __init__(self, world):
+    def __init__(self, world, dbs):
         self.world = world
+        self.dbs = dbs
 
         host = CONFIG.get('MQTT Auth', 'Hostname', fallback='127.0.0.1')
         port = CONFIG.getint('MQTT Auth', 'Port', fallback=1883)
@@ -183,10 +186,10 @@ class MqttService:
             mac_address = topic[len(self.channel_in_sensors_prefix):]
             stone = Stone(mac_address, BeaconId(data['uuid'], data['major'], data['minor']), data['comment'])
 
-            # Parse time string (time is handeled in UTC)
+            # Parse time string (time is handled in UTC)
             time_string = data['timestamp']
             time_dt = datetime.strptime(time_string, '%Y-%m-%dT%H:%M:%SZ')
-            time_dt.replace(tzinfo=tz.UTC)
+            time_dt = time_dt.replace(tzinfo=timezone.utc)
             timestamp = int(time_dt.timestamp())
 
             # Add contacts
@@ -208,6 +211,10 @@ class MqttService:
                 self.publish_persistent(self.channel_out_stones, agg_stones.encode('utf-8'))
                 self.publish_persistent(self.channel_out_graph, agg_graph.encode('utf-8'))
 
+            # Store stone event in database
+            if self.dbs is not None:
+                self.dbs.store_event(stone)
+
         elif topic == self.channel_in_nameupdate:
             # Update the description
             self.world.update_desc(data['mac'], data['name'], data['color'])
@@ -220,6 +227,76 @@ class MqttService:
 
     def publish_persistent(self, topic, payload):
         self.client.publish(topic, payload, retain=True)
+
+
+class DBService:
+    Base = declarative_base()
+
+    class SensorContact(Base):
+        __tablename__ = 'sensor_contacts'
+
+        id = Column(Integer, primary_key=True, autoincrement=True)
+        stone_event_id = Column(Integer, ForeignKey('stone_events.id'))
+        mac = Column(String(17))
+        uuid = Column(String(47))
+        major = Column(Integer)
+        minor = Column(Integer)
+        min = Column(Integer)
+        max = Column(Integer)
+        avg = Column(Integer)
+        remote_rssi = Column(Integer)
+
+        stone_event = relationship('StoneEvent', back_populates='contacts')
+
+    class StoneEvent(Base):
+        __tablename__ = 'stone_events'
+
+        id = Column(Integer, primary_key=True, autoincrement=True)
+        mac = Column(String(17))
+        uuid = Column(String(47))
+        major = Column(Integer)
+        minor = Column(Integer)
+        timestamp = Column(DateTime)
+        comment = Column(String(128))
+
+        contacts = relationship('SensorContact', back_populates='stone_event')
+
+    def __init__(self):
+        host = CONFIG.get('Database', 'Hostname', fallback='localhost')
+        port = CONFIG.getint('Database', 'Port', fallback=3306)
+        user = CONFIG.get('Database', 'Username', fallback='aggregator')
+        passwd = CONFIG.get('Database', 'Password', fallback='')
+        db = CONFIG.get('Database', 'Database', fallback='fieldtracks')
+
+        self.engine = create_engine('mysql+mysqldb://{}:{}@{}:{}/{}'.format(user, passwd, host, port, db))
+        DBService.Base.metadata.create_all(self.engine)
+        Session = sessionmaker(bind=self.engine)
+        self.session = Session()
+
+    def stop(self):
+        self.session.close()
+
+    def store_event(self, stone):
+        time = datetime.utcfromtimestamp(stone.last_update)
+        db_stone = DBService.StoneEvent(mac=stone.mac_address,
+                                        uuid=stone.b_address.uuid,
+                                        major=stone.b_address.major,
+                                        minor=stone.b_address.minor,
+                                        timestamp=time,
+                                        comment=stone.comment)
+        for contact in stone.contacts:
+            db_contact = DBService.SensorContact(mac=contact.mac_address,
+                                                 uuid=contact.b_address.uuid,
+                                                 major=contact.b_address.major,
+                                                 minor=contact.b_address.minor,
+                                                 min=contact.rssi_min,
+                                                 max=contact.rssi_max,
+                                                 avg=contact.rssi_avg,
+                                                 remote_rssi=contact.tx_rssi)
+            db_stone.contacts.append(db_contact)
+
+        self.session.add(db_stone)
+        self.session.commit()
 
 
 class Main:
@@ -237,9 +314,16 @@ class Main:
         # Create a world for storing data
         self.world = World()
 
+        # Setup database
+        if CONFIG.getboolean('Database', 'EnableLogging', fallback=False):
+            print('Setting up database...')
+            self.dbs = DBService()
+        else:
+            self.dbs = None
+
         # Setup the MQTT service for communication
         print('Starting MQTT service...')
-        self.mqtts = MqttService(self.world)
+        self.mqtts = MqttService(self.world, self.dbs)
 
         # Catch sigints
         signal.signal(signal.SIGINT, self.catch_sigint)
@@ -254,6 +338,8 @@ class Main:
         print('\rInterrupted!')
         print('Stopping...')
         self.mqtts.stop()
+        if self.dbs is not None:
+            self.dbs.stop()
 
 
 if __name__ == '__main__':
