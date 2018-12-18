@@ -1,0 +1,8 @@
+Package: stoneaggregator
+Version: 1.0-##BUILDNR##
+Section: base
+Priority: optional
+Architecture: all
+Depends: libmariadbclient-dev, python3, python3-pip
+Maintainer: Henrik Schnor <hschnor@mailbox.org>
+Description: Aggregates sensor data from stones
