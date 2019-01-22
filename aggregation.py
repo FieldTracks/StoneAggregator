@@ -137,6 +137,7 @@ class MqttService:
         port = CONFIG.getint('MQTT Auth', 'Port', fallback=1883)
         usetls = CONFIG.getboolean('MQTT Auth', 'UseTLS', fallback=False)
         cacert = CONFIG.get('MQTT Auth', 'CACert', fallback='server.pem')
+        insecure = CONFIG.get('MQTT Auth', 'Insecure', fallback=False)
         user = CONFIG.get('MQTT Auth', 'Username', fallback='Aggregator')
         passwd = CONFIG.get('MQTT Auth', 'Password', fallback='')
 
@@ -152,6 +153,8 @@ class MqttService:
         self.client.on_message = self.on_message
         if usetls:
             self.client.tls_set(cacert, tls_version=ssl.PROTOCOL_TLSv1_2)
+            if insecure:
+                self.client.tls_insecure_set(True)
         self.client.connect(host, port)
         self.client.subscribe(self.channel_in_sensors)
         self.client.subscribe(self.channel_in_nameupdate)

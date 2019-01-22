@@ -4,7 +4,7 @@ Description=StoneAggregator service file
 [Service]
 ExecStart=/usr/local/bin/stoneaggregator /etc/stoneaggregator/config.ini
 TimeoutStopSec=10
-ExecStop=/bin/kill -2 \$MAINPID
+ExecStop=/bin/kill -2 $MAINPID
 
 [Install]
 WantedBy=multi-user.target
