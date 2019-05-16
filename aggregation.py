@@ -137,7 +137,7 @@ class MqttService:
         port = CONFIG.getint('MQTT Auth', 'Port', fallback=1883)
         usetls = CONFIG.getboolean('MQTT Auth', 'UseTLS', fallback=False)
         cacert = CONFIG.get('MQTT Auth', 'CACert', fallback='server.pem')
-        insecure = CONFIG.get('MQTT Auth', 'Insecure', fallback=False)
+        insecure = CONFIG.getboolean('MQTT Auth', 'Insecure', fallback=False)
         user = CONFIG.get('MQTT Auth', 'Username', fallback='Aggregator')
         passwd = CONFIG.get('MQTT Auth', 'Password', fallback='')
 
