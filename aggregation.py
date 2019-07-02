@@ -146,6 +146,7 @@ class MqttService:
     def __init__(self, world, dbs):
         self.world = world
         self.dbs = dbs
+        self.is_running = True
 
         host = CONFIG.get('MQTT Auth', 'Hostname', fallback='127.0.0.1')
         port = CONFIG.getint('MQTT Auth', 'Port', fallback=1883)
@@ -164,14 +165,16 @@ class MqttService:
 
         self.client = mqtt.Client('Aggregator')
         self.client.username_pw_set(user, passwd)
-        self.client.on_message = self.on_message
         if usetls:
             self.client.tls_set(cacert, tls_version=ssl.PROTOCOL_TLSv1_2)
             if insecure:
                 self.client.tls_insecure_set(True)
+        self.client.reconnect_delay_set(min_delay=1, max_delay=30)
+
+        self.client.on_message = self.on_message
+        self.client.on_connect = self.on_connect
+        self.client.on_disconnect = self.on_disconnect
         self.client.connect(host, port)
-        self.client.subscribe(self.channel_in_sensors)
-        self.client.subscribe(self.channel_in_nameupdate)
 
         self.update_interval = CONFIG.getint('Aggregator', 'UpdateInterval', fallback=4)
         self.last_stone_update = 0
@@ -181,7 +184,19 @@ class MqttService:
         self.client.loop_forever()
 
     def stop(self):
+        self.is_running = False
         self.client.disconnect()
+
+    def on_connect(self, client, userdata, flags, rc):
+        self.client.subscribe(self.channel_in_sensors)
+        self.client.subscribe(self.channel_in_nameupdate)
+        logging.info('MQTT connected!')
+
+    def on_disconnect(self, client, userdata, rc):
+        if self.is_running and rc != mqtt.MQTT_ERR_SUCCESS:
+            logging.warning('Lost connection to the MQTT broker!')
+        else:
+            logging.info('MQTT disconnected!')
 
     def on_message(self, client, userdata, message):
         topic = message.topic
