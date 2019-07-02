@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+import logging
+import logging.handlers
 import threading
 import configparser
 import sys
@@ -181,7 +183,7 @@ class MqttService:
             # Get data from json
             data = json.loads(payload.decode('utf-8'))
         except Exception as e:
-            print('Could not decode message of length {} in topic {}'.format(len(payload), topic))
+            logging.warning('Could not decode message of length {} in topic {}'.format(len(payload), topic))
             return
 
         if topic.startswith(self.channel_in_sensors_prefix):
@@ -314,32 +316,41 @@ class Main:
         CONFIG = configparser.ConfigParser()
         CONFIG.read(sys.argv[1])
 
+        # Configure logging
+        syslog_handler = logging.handlers.SysLogHandler(address = '/dev/log')
+        syslog_formatter = logging.Formatter('%(levelname)s: %(message)s')
+        syslog_handler.setFormatter(syslog_formatter)
+        console_handler = logging.StreamHandler()
+        console_formatter = logging.Formatter('%(message)s')
+        console_handler.setFormatter(console_formatter)
+        logging.basicConfig(level=logging.DEBUG, handlers=[console_handler, syslog_handler])
+
         # Create a world for storing data
         self.world = World()
 
         # Setup database
         if CONFIG.getboolean('Database', 'EnableLogging', fallback=False):
-            print('Setting up database...')
+            logging.info('Setting up database...')
             self.dbs = DBService()
         else:
             self.dbs = None
 
         # Setup the MQTT service for communication
-        print('Starting MQTT service...')
+        logging.info('Starting MQTT service...')
         self.mqtts = MqttService(self.world, self.dbs)
 
         # Catch sigints
         signal.signal(signal.SIGINT, self.catch_sigint)
 
         # Listen for incoming mqtt data (blocking)
-        print('Running...')
+        logging.info('Running...')
         self.mqtts.watch_mqtt()
-        print('Done!')
+        logging.info('Done!')
 
 
     def catch_sigint(self, signum, frame):
-        print('\rInterrupted!')
-        print('Stopping...')
+        logging.info('\rInterrupted!')
+        logging.info('Stopping...')
         self.mqtts.stop()
         if self.dbs is not None:
             self.dbs.stop()
