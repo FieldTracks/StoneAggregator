@@ -9,11 +9,22 @@ import json
 import signal
 import zlib
 import ssl
+import time
 from datetime import datetime, timezone
 import paho.mqtt.client as mqtt
 from sqlalchemy import create_engine, ForeignKey, Column, Integer, String, DateTime
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
+
+
+class Utils:
+    def iso_to_tstamp(iso_time):
+        # Parse time string (time is handled in UTC)
+        time_iso = iso_time
+        time_dt = datetime.strptime(time_iso, '%Y-%m-%dT%H:%M:%SZ')
+        time_dt = time_dt.replace(tzinfo=timezone.utc)
+        timestamp = int(time_dt.timestamp())
+        return timestamp
 
 
 class BeaconId:
@@ -53,17 +64,18 @@ class Stone:
         self.comment = comment
 
         # Updates
-        self.last_update = 0
+        self.last_update = ''
         self.contacts = []
 
-    def update(self, timestamp, recent_contacts):
+    def update(self, iso_time, recent_contacts):
         # We assume for now that updates are fairly recent
         # NOTE: This might change in the future if we
         # queue and send messages via LoRaWAN
-        self.last_update = timestamp
+        self.last_update = iso_time
+        timestamp = Utils.iso_to_tstamp(iso_time)
 
         # Remove contacts that are older than 60 seconds
-        self.contacts = [c for c in self.contacts if c.timestamp >= (timestamp - 60)]
+        self.contacts = [c for c in self.contacts if Utils.iso_to_tstamp(c.timestamp) >= (timestamp - 60)]
 
         # Update or add new contacts
         for ct in recent_contacts:
@@ -104,7 +116,7 @@ class Aggregator:
         # Create list of stones
         stones_info = dict()
         for mac, s in stones.items():
-            stones_info[mac] = {'uuid': s.b_address.uuid, 'major': s.b_address.major, 'minor': s.b_address.minor, 'comment': s.comment, 'last_seen': s.last_update}
+            stones_info[mac] = {'uuid': s.b_address.uuid, 'major': s.b_address.major, 'minor': s.b_address.minor, 'comment': s.comment, 'timestamp': s.last_update}
             if CONFIG.getboolean('Aggregator', 'StoneInfoIncludeContacts', fallback=True):
                 stones_info[mac]['contacts'] = list()
                 for c in s.contacts:
@@ -116,9 +128,9 @@ class Aggregator:
         # Create list of stones
         stones_info = dict()
         for mac, s in stones.items():
-            stones_info[mac] = {'uuid': s.b_address.uuid, 'major': s.b_address.major, 'minor': s.b_address.minor, 'comment': s.comment, 'age': current_time - s.last_update, 'contacts': []}
+            stones_info[mac] = {'uuid': s.b_address.uuid, 'major': s.b_address.major, 'minor': s.b_address.minor, 'comment': s.comment, 'age': current_time - Utils.iso_to_tstamp(s.last_update), 'contacts': []}
             for c in s.contacts:
-                stones_info[mac]['contacts'].append({'mac': c.mac_address, 'uuid': c.b_address.uuid, 'major': c.b_address.major, 'minor': c.b_address.minor, 'age': current_time - c.timestamp, 'rssi_avg': c.rssi_avg, 'rssi_tx': c.tx_rssi})
+                stones_info[mac]['contacts'].append({'mac': c.mac_address, 'uuid': c.b_address.uuid, 'major': c.b_address.major, 'minor': c.b_address.minor, 'age': current_time - Utils.iso_to_tstamp(c.timestamp), 'rssi_avg': c.rssi_avg, 'rssi_tx': c.tx_rssi})
         return json.dumps(stones_info)
 
     @staticmethod
@@ -191,28 +203,22 @@ class MqttService:
             mac_address = topic[len(self.channel_in_sensors_prefix):]
             stone = Stone(mac_address, BeaconId(data['uuid'], data['major'], data['minor']), data['comment'])
 
-            # Parse time string (time is handled in UTC)
-            time_string = data['timestamp']
-            time_dt = datetime.strptime(time_string, '%Y-%m-%dT%H:%M:%SZ')
-            time_dt = time_dt.replace(tzinfo=timezone.utc)
-            timestamp = int(time_dt.timestamp())
-
             # Add contacts
             contacts = list()
             for ct in data['data']:
                 bid = BeaconId(ct['uuid'], ct['major'], ct['minor']) if ('uuid' in ct and 'major' in ct and 'minor' in ct) else BeaconId('', 0, 0)
-                contacts.append(Contact(timestamp, ct['mac'], bid, ct['min'], ct['max'], ct['avg'], ct['remoteRssi']))
-            stone.update(timestamp, contacts)
+                contacts.append(Contact(data['timestamp'], ct['mac'], bid, ct['min'], ct['max'], ct['avg'], ct['remoteRssi']))
+            stone.update(data['timestamp'], contacts)
 
             # Update world model
             self.world.update_stone(stone)
 
             # Publish aggregated data
-            if (timestamp - self.last_stone_update) >= self.update_interval:
-                self.last_stone_update = timestamp
+            if(time.time() - self.last_stone_update) >= self.update_interval:
+                self.last_stone_update = time.time()
                 with self.world.get_lock():
                     agg_stones = Aggregator.aggregate_stones(self.world.get_stones())
-                    agg_graph = Aggregator.aggregate_graph(self.world.get_stones(), timestamp)
+                    agg_graph = Aggregator.aggregate_graph(self.world.get_stones(), Utils.iso_to_tstamp(data['timestamp']))
                 self.publish_persistent(self.channel_out_stones, agg_stones.encode('utf-8'))
                 self.publish_persistent(self.channel_out_graph, agg_graph.encode('utf-8'))
 
