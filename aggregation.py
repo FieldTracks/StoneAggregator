@@ -190,6 +190,7 @@ class MqttService:
     def on_connect(self, client, userdata, flags, rc):
         self.client.subscribe(self.channel_in_sensors)
         self.client.subscribe(self.channel_in_nameupdate)
+        self.client.subscribe(self.channel_out_names)
         logging.info('MQTT connected!')
 
     def on_disconnect(self, client, userdata, rc):
@@ -249,6 +250,26 @@ class MqttService:
             with self.world.get_lock():
                 agg_descs = Aggregator.aggregate_descs(self.world.get_descs())
             self.publish_persistent(self.channel_out_names, agg_descs.encode('utf-8'))
+
+        elif topic == self.channel_out_names:
+            # This should pick up the last retained aggregated names on startup
+            # Since we only need the last message we should unsubscribe here
+            self.client.unsubscribe(self.channel_out_names)
+
+            if type(data) is not dict:
+                logging.warning('Can\'t parse retained names!')
+                return
+
+            num_imported = 0
+
+            for mac, entry in data.items():
+                if type(entry) is dict and 'name' in entry and 'color' in entry:
+                    self.world.update_desc(mac, entry['name'], entry['color'])
+                    num_imported += 1
+                else:
+                    logging.warning('Invalid name entry in retained message!')
+
+            logging.info('Imported {} descriptions from last aggregated message'.format(num_imported))
 
 
     def publish_persistent(self, topic, payload):
