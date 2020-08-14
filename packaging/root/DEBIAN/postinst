@@ -5,3 +5,4 @@ pip3 install -r /usr/share/stoneaggregator/requirements.txt
 echo 'Setting up service...'
 deb-systemd-helper debian-installed stoneaggregator.service || true
 deb-systemd-helper enable stoneaggregator.service || true
+deb-systemd-helper update-state stoneaggregator.service
