@@ -359,7 +359,7 @@ class Main:
         CONFIG.read(sys.argv[1])
 
         # Configure logging
-       logging.basicConfig(
+        logging.basicConfig(
             format='%(asctime)s.%(msecs)03d %(levelname)s %(name)s %(message)s',
             level=logging.NOTSET,
             datefmt='%s %Y-%m-%d %H:%M:%S')
