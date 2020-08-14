@@ -359,13 +359,10 @@ class Main:
         CONFIG.read(sys.argv[1])
 
         # Configure logging
-        syslog_handler = logging.handlers.SysLogHandler(address = '/dev/log')
-        syslog_formatter = logging.Formatter('%(levelname)s: %(message)s')
-        syslog_handler.setFormatter(syslog_formatter)
-        console_handler = logging.StreamHandler()
-        console_formatter = logging.Formatter('%(message)s')
-        console_handler.setFormatter(console_formatter)
-        logging.basicConfig(level=logging.DEBUG, handlers=[console_handler, syslog_handler])
+       logging.basicConfig(
+            format='%(asctime)s.%(msecs)03d %(levelname)s %(name)s %(message)s',
+            level=logging.NOTSET,
+            datefmt='%s %Y-%m-%d %H:%M:%S')
 
         # Create a world for storing data
         self.world = World()
